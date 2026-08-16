@@ -124,5 +124,5 @@ scripts/build.sh     构建：复制 host + tsdown 打包 client
 
 ---
 
-> 🛠 本项目完全使用 DeepSeek V4 Flash，以 vibe coding（AI 驱动开发）方式制作：
+> 🛠 本项目完全使用 DeepSeek V4 Flash，以 vibe coding方式制作：
 > 需求确认、UI 样式与验收由人工完成，代码由 AI 全程生成。
