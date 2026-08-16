@@ -110,3 +110,14 @@ scripts/build.sh     构建：复制 host + tsdown 打包 client
 | 返回 `InvalidTimestamp` | 本机时钟与真实时间偏差过大（签名 15 分钟窗口） |
 | 面板显示「暂无额度数据」 | 该账号未订阅 Coding/Agent Plan，或套餐类型选错 |
 | 悬浮球/配置卡片不出现 | 检查 bundle 是否在 `dsh.profile.bundles`，或 web 服务日志 `hmr/config-update-failed` |
+
+## 参考与致谢
+
+查询界面视觉与组件结构参考了以下 MIT 协议的社区插件，完整版权声明见
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)：
+
+- [Xenia0922/dsh-opencode-go-usage](https://github.com/Xenia0922/dsh-opencode-go-usage)（MIT）
+- [margrop/coding-plan-dashboard](https://github.com/margrop/coding-plan-dashboard)（MIT）
+- [jiekesu967/dsh-plugin-opencode-usage](https://github.com/jiekesu967/dsh-plugin-opencode-usage)（MIT）
+
+本插件自身以 BSD-3-Clause 授权（见 [LICENSE](./LICENSE)）。
