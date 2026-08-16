@@ -1,0 +1,47 @@
+{
+  "name": "@dsh-external/dsh-volcark-quota",
+  "version": "0.0.1",
+  "description": "火山方舟 Coding Plan / Agent Plan 额度实时查看 DSH 插件：AK/SK 直连 open.volcengineapi.com（GetCodingPlanUsage / GetAgentPlanAFPUsage），悬浮小球 + 可拖拽悬浮窗展示各窗口已用/剩余/重置倒计时（两位小数），AK/SK 在「设置 → 插件」页配置。",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZnonEn/dsh-volcark-quota.git"
+  },
+  "homepage": "https://github.com/ZnonEn/dsh-volcark-quota#readme",
+  "bugs": {
+    "url": "https://github.com/ZnonEn/dsh-volcark-quota/issues"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.0",
+    "tsdown": "^0.22.14"
+  },
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "build:client": "tsdown"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  }
+}

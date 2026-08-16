@@ -1,0 +1,10 @@
+# @dsh-external/dsh-volcark-quota bundle patch: contributes the plugin row
+# into the host composition when this package is installed as a bundle.
+#
+# The plugin is HOST-PLANE: its host half reads webServer and serves a
+# snapshot route (/dsh-volcark-quota/snapshot), and its client half registers
+# a right-docked shell.overlay quota panel. It must therefore land in the
+# host composition (this insert), never inside an agent preset.
+- insert:
+    - id: dsh-volcark-quota
+      name: '@dsh-external/dsh-volcark-quota'
