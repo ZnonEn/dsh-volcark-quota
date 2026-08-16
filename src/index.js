@@ -6,24 +6,33 @@
  *  - 接口：GetCodingPlanUsage / GetAgentPlanAFPUsage（POST https://open.volcengineapi.com/）
  *  - 服务：webServer 路由 /dsh-volcark-quota/snapshot（client 面板消费）
  *
- * 依赖：仅 node:crypto / node:https + webServer 服务。不 import 任何
- * cordis / schemastery / @deepseek-ai/* 包，避免 profile 依赖解析问题。
+ * 依赖：仅 node:crypto / node:https + webServer / credentials 服务。
+ * 不 import 任何 cordis / schemastery / @deepseek-ai/* 包，避免 profile
+ * 依赖解析问题（credentialRef 运行时即字符串，直接传引用名即可）。
  *
- * 凭据来源优先级：请求体（面板传入）> 插件 Config > 环境变量
- * （VOLC_ACCESS_KEY_ID / VOLC_ACCESS_KEY_SECRET，兼容 ARK_* 前缀）。
+ * 凭据存储（与 DSH 自身存 API key 同一机制）：
+ *  - 走 ctx.credentials 服务（dsh-credentials-local）：env 优先，
+ *    ~/.dsh/.credentials.yaml 落盘兜底，describe() 只报状态不返回值。
+ *  - 引用名：VOLC_ARK_ACCESS_KEY_ID / VOLC_ARK_ACCESS_KEY_SECRET
+ *  - 兼容旧环境变量：VOLC_ACCESS_KEY_ID / VOLC_ACCESS_KEY_SECRET 等。
+ *  - 优先级：请求体显式覆盖 > credentials 服务 > 历史环境变量。
  */
 
 import { createHash, createHmac } from 'node:crypto'
 import https from 'node:https'
 
 export const name = 'dsh-volcark-quota'
-export const inject = ['webServer']
+export const inject = ['webServer', 'credentials']
 
 const VOLC_HOST = 'open.volcengineapi.com'
 const VOLC_REGION = 'cn-beijing'
 const VOLC_SERVICE = 'ark'
 const VOLC_VERSION = '2024-01-01'
 const ACTIONS = { coding: 'GetCodingPlanUsage', agent: 'GetAgentPlanAFPUsage' }
+
+// DSH 凭据服务引用名（与 env 同名，env 会自然遮蔽文件层）
+const REF_AK = 'VOLC_ARK_ACCESS_KEY_ID'
+const REF_SK = 'VOLC_ARK_ACCESS_KEY_SECRET'
 
 function num(v) {
   const n = Number(v)
@@ -177,16 +186,30 @@ function parseVolcengine(payload) {
   throw new Error('无法识别的额度响应结构，请检查 AK/SK 权限与套餐订阅')
 }
 
-function resolveCredentials(config, akFromReq, skFromReq) {
+/** 凭据解析：请求体显式覆盖 > ctx.credentials 服务 > 历史环境变量。 */
+async function resolveCredentials(ctx, akFromReq, skFromReq) {
+  if (akFromReq && skFromReq) {
+    return { ak: String(akFromReq).trim(), sk: String(skFromReq).trim(), source: 'request' }
+  }
+  try {
+    const [a, s] = await Promise.all([
+      ctx.credentials.resolve(REF_AK),
+      ctx.credentials.resolve(REF_SK),
+    ])
+    if (a && a.value && s && s.value) {
+      return { ak: a.value.trim(), sk: s.value.trim(), source: a.source }
+    }
+  } catch { /* credentials 服务不可用时忽略 */ }
   const env = process.env
-  const ak = (akFromReq || config.accessKeyId || env.VOLC_ACCESS_KEY_ID || env.VOLC_ACCESS_KEY || env.ARK_ACCESS_KEY_ID || '').trim()
-  const sk = (skFromReq || config.secretAccessKey || env.VOLC_ACCESS_KEY_SECRET || env.VOLC_SECRET_KEY || env.ARK_ACCESS_KEY_SECRET || '').trim()
-  return { ak, sk }
+  const ak = (env.VOLC_ACCESS_KEY_ID || env.VOLC_ACCESS_KEY || env.ARK_ACCESS_KEY_ID || '').trim()
+  const sk = (env.VOLC_ACCESS_KEY_SECRET || env.VOLC_SECRET_KEY || env.ARK_ACCESS_KEY_SECRET || '').trim()
+  if (ak && sk) return { ak, sk, source: 'env' }
+  return { ak: '', sk: '', source: null }
 }
 
 async function fetchQuota(ak, sk, planType) {
   if (!ak || !sk) {
-    throw new Error('未配置火山方舟 AK/SK：请在「设置 → 插件」页的「火山方舟额度」卡片中填写，或设置环境变量 VOLC_ACCESS_KEY_ID / VOLC_ACCESS_KEY_SECRET')
+    throw new Error('未配置火山方舟 AK/SK：请在「设置 → 插件」页的「火山方舟额度」卡片中填写（存于 DSH 凭据库 ~/.dsh/.credentials.yaml），或设置环境变量 VOLC_ARK_ACCESS_KEY_ID / VOLC_ARK_ACCESS_KEY_SECRET')
   }
   const types = planType === 'agent' ? ['agent'] : planType === 'coding' ? ['coding'] : ['coding', 'agent']
   let lastError = null
@@ -212,6 +235,11 @@ function readBody(req) {
 }
 
 export function apply(ctx, config = {}) {
+  const json = (res, code, obj) => {
+    res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify(obj))
+  }
+
   // HTTP 路由：client 面板消费（POST JSON 或 GET query）
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
@@ -231,14 +259,61 @@ export function apply(ctx, config = {}) {
             if (parsed.planType) planType = parsed.planType
           }
         }
-        const cred = resolveCredentials(config, ak, sk)
+        const cred = await resolveCredentials(ctx, ak, sk)
         const snapshot = await fetchQuota(cred.ak, cred.sk, planType)
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-        res.end(JSON.stringify(snapshot))
+        json(res, 200, { ...snapshot, source: cred.source })
       } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
-        res.end(JSON.stringify({ ok: false, error: String((e && e.message) || e) }))
+        json(res, 400, { ok: false, error: String((e && e.message) || e) })
       }
     },
   }), 'dsh-volcark-quota: snapshot route')
+
+  // 配置状态查询：只报已配置/来源/可写，绝不返回值
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/dsh-volcark-quota/config',
+    handler: async (req, res) => {
+      try {
+        const method = (req.method || 'GET').toUpperCase()
+        if (method === 'GET') {
+          const [ak, sk] = await Promise.all([
+            ctx.credentials.describe(REF_AK),
+            ctx.credentials.describe(REF_SK),
+          ])
+          return json(res, 200, { ok: true, ak, sk })
+        }
+        if (method === 'POST') {
+          const body = await readBody(req)
+          const parsed = body ? JSON.parse(body) : {}
+          const setOne = async (ref, val) => {
+            if (val === undefined) return
+            const v = String(val).trim()
+            if (v) await ctx.credentials.set(ref, v)
+            else await ctx.credentials.unset(ref)
+          }
+          await setOne(REF_AK, parsed.ak)
+          await setOne(REF_SK, parsed.sk)
+          return json(res, 200, { ok: true })
+        }
+        return json(res, 405, { ok: false, error: 'Method Not Allowed' })
+      } catch (e) {
+        json(res, 400, { ok: false, error: String((e && e.message) || e) })
+      }
+    },
+  }), 'dsh-volcark-quota: config route')
+
+  // 清空凭据
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/dsh-volcark-quota/clear',
+    handler: async (_req, res) => {
+      try {
+        await ctx.credentials.unset(REF_AK)
+        await ctx.credentials.unset(REF_SK)
+        json(res, 200, { ok: true })
+      } catch (e) {
+        json(res, 400, { ok: false, error: String((e && e.message) || e) })
+      }
+    },
+  }), 'dsh-volcark-quota: clear route')
 }

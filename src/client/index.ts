@@ -30,8 +30,8 @@ type ClientContext = {
 export const inject = ['slots']
 
 const API_URL = '/dsh-volcark-quota/snapshot'
-const LS_AK = 'dsh-volcark-quota.ak'
-const LS_SK = 'dsh-volcark-quota.sk'
+const CFG_URL = '/dsh-volcark-quota/config'
+const CLEAR_URL = '/dsh-volcark-quota/clear'
 const LS_PLAN = 'dsh-volcark-quota.plan'
 const LS_OPEN = 'dsh-volcark-quota.open'
 const LS_BALL = 'dsh-volcark-quota.ball'
@@ -196,10 +196,11 @@ function QuotaFloater(): React.ReactElement {
   const load = React.useCallback(async () => {
     setLoading(true)
     try {
+      // AK/SK 不经过浏览器：由 host 从 DSH 凭据库（ctx.credentials）解析
       const res = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ak: localStorage.getItem(LS_AK) || undefined, sk: localStorage.getItem(LS_SK) || undefined, planType: localStorage.getItem(LS_PLAN) || 'auto' }),
+        body: JSON.stringify({ planType: localStorage.getItem(LS_PLAN) || 'auto' }),
       })
       const json = await res.json()
       if (!json.ok) throw new Error(json.error || '额度查询失败')
@@ -330,7 +331,7 @@ function QuotaFloater(): React.ReactElement {
   if (loading && !data) body.push(h('div', { key: 'loading', className: 'vq-loading' }, '加载中…'))
   if (error) {
     body.push(h('div', { key: 'err', className: 'vq-err' },
-      error + (localStorage.getItem(LS_AK) ? '' : '\n\n提示：AK/SK 请在「设置 → 插件」页的「火山方舟额度」卡片里配置。'),
+      error + '\n\n提示：AK/SK 请在「设置 → 插件」页的「火山方舟额度」卡片里填写（存于 DSH 凭据库，浏览器不保存密钥）。',
     ))
   }
   if (hot.length > 0) {
@@ -411,37 +412,88 @@ function Chevron(): React.ReactElement {
   )
 }
 
+type CfgState = { configured: boolean; source?: string; writable: boolean }
+
 function ConfigCard(): React.ReactElement {
   const [open, setOpen] = React.useState(false)
-  const [ak, setAk] = React.useState(() => localStorage.getItem(LS_AK) || '')
-  const [sk, setSk] = React.useState(() => localStorage.getItem(LS_SK) || '')
+  const [ak, setAk] = React.useState('')
+  const [sk, setSk] = React.useState('')
   const [plan, setPlan] = React.useState(() => localStorage.getItem(LS_PLAN) || 'auto')
+  const [akCfg, setAkCfg] = React.useState<CfgState>({ configured: false, writable: true })
+  const [skCfg, setSkCfg] = React.useState<CfgState>({ configured: false, writable: true })
   const [dirty, setDirty] = React.useState(false)
   const [saved, setSaved] = React.useState(false)
+  const [busy, setBusy] = React.useState(false)
+  const [err, setErr] = React.useState('')
+
+  const refreshStatus = React.useCallback(async () => {
+    try {
+      const res = await fetch(CFG_URL)
+      const j = await res.json()
+      if (j.ok) {
+        setAkCfg({ configured: !!j.ak.configured, source: j.ak.source, writable: !!j.ak.writable })
+        setSkCfg({ configured: !!j.sk.configured, source: j.sk.source, writable: !!j.sk.writable })
+      }
+    } catch { /* host 未就绪时忽略 */ }
+  }, [])
+
+  React.useEffect(() => {
+    refreshStatus()
+  }, [refreshStatus])
 
   const edit = (setter: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setter(e.target.value)
     setDirty(true)
     setSaved(false)
+    setErr('')
   }
 
-  const save = () => {
-    localStorage.setItem(LS_AK, ak)
-    localStorage.setItem(LS_SK, sk)
-    localStorage.setItem(LS_PLAN, plan)
-    setDirty(false)
-    setSaved(true)
-    window.dispatchEvent(new CustomEvent(CRED_EVENT))
-    setTimeout(() => setSaved(false), 1600)
+  const save = async () => {
+    setBusy(true)
+    setErr('')
+    try {
+      const res = await fetch(CFG_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ak, sk }),
+      })
+      const j = await res.json()
+      if (!j.ok) throw new Error(j.error || '保存失败')
+      localStorage.setItem(LS_PLAN, plan)
+      setAk('')
+      setSk('')
+      setDirty(false)
+      setSaved(true)
+      await refreshStatus()
+      window.dispatchEvent(new CustomEvent(CRED_EVENT))
+      setTimeout(() => setSaved(false), 1600)
+    } catch (e2) {
+      setErr(String((e2 as Error).message || e2))
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const discard = () => {
-    setAk(localStorage.getItem(LS_AK) || '')
-    setSk(localStorage.getItem(LS_SK) || '')
-    setPlan(localStorage.getItem(LS_PLAN) || 'auto')
-    setDirty(false)
-    setSaved(false)
+  const clear = async () => {
+    setBusy(true)
+    setErr('')
+    try {
+      const res = await fetch(CLEAR_URL, { method: 'POST' })
+      const j = await res.json()
+      if (!j.ok) throw new Error(j.error || '清除失败')
+      setAk('')
+      setSk('')
+      setDirty(false)
+      await refreshStatus()
+      window.dispatchEvent(new CustomEvent(CRED_EVENT))
+    } catch (e2) {
+      setErr(String((e2 as Error).message || e2))
+    } finally {
+      setBusy(false)
+    }
   }
+
+  const anyWritable = akCfg.writable || skCfg.writable
 
   return h('li', { className: 'vq-card' },
     h('button', { type: 'button', className: 'vq-card-header', 'aria-expanded': open, onClick: () => setOpen(!open) },
@@ -454,12 +506,12 @@ function ConfigCard(): React.ReactElement {
     ),
     open ? h('div', { className: 'vq-card-body' },
       h('div', { className: 'vq-card-field' },
-        h('label', { className: 'vq-card-label', htmlFor: 'vq-cfg-ak' }, 'AccessKey ID'),
-        h('input', { id: 'vq-cfg-ak', className: 'vq-card-input', value: ak, placeholder: 'AKLT…', onChange: edit(setAk) }),
+        h('label', { className: 'vq-card-label', htmlFor: 'vq-cfg-ak' }, 'AccessKey ID' + (akCfg.configured ? '（已配置' + (akCfg.source ? ' · ' + akCfg.source : '') + '）' : '（未配置）')),
+        h('input', { id: 'vq-cfg-ak', className: 'vq-card-input', value: ak, placeholder: 'AKLT…', disabled: !akCfg.writable, onChange: edit(setAk) }),
       ),
       h('div', { className: 'vq-card-field' },
-        h('label', { className: 'vq-card-label', htmlFor: 'vq-cfg-sk' }, 'Secret AccessKey'),
-        h('input', { id: 'vq-cfg-sk', className: 'vq-card-input', type: 'password', value: sk, placeholder: '仅写入本机 localStorage，host 不落盘', onChange: edit(setSk) }),
+        h('label', { className: 'vq-card-label', htmlFor: 'vq-cfg-sk' }, 'Secret AccessKey' + (skCfg.configured ? '（已配置' + (skCfg.source ? ' · ' + skCfg.source : '') + '）' : '（未配置）')),
+        h('input', { id: 'vq-cfg-sk', className: 'vq-card-input', type: 'password', value: sk, placeholder: '留空并保存 = 清除该项', disabled: !skCfg.writable, onChange: edit(setSk) }),
       ),
       h('div', { className: 'vq-card-field' },
         h('label', { className: 'vq-card-label', htmlFor: 'vq-cfg-plan' }, '套餐类型'),
@@ -469,12 +521,16 @@ function ConfigCard(): React.ReactElement {
           h('option', { value: 'agent' }, 'Agent Plan'),
         ),
       ),
-      h('div', { className: 'vq-card-hint' }, '凭据仅存本机浏览器，随请求发给 127.0.0.1 的 DSH 服务；也可改用环境变量 VOLC_ACCESS_KEY_ID / VOLC_ACCESS_KEY_SECRET 启动 DSH。'),
+      h('div', { className: 'vq-card-hint' },
+        '密钥存于 DSH 凭据库（~/.dsh/.credentials.yaml，环境变量优先），浏览器不保存密钥、host 只报状态不返回值。' +
+        (!anyWritable ? ' 当前凭据来自只读来源（环境变量），请在环境变量处修改。' : ''),
+      ),
+      err ? h('div', { className: 'vq-err' }, err) : null,
       h('div', { className: 'vq-card-footer' },
         saved ? h('span', { className: 'vq-card-saved' }, '已保存，悬浮球已刷新 ✓') : null,
         h('span', { className: 'vq-spacer' }),
-        h('button', { type: 'button', className: 'vq-card-discard', onClick: discard, disabled: !dirty }, '丢弃'),
-        h('button', { type: 'button', className: 'vq-card-save', onClick: save }, '保存'),
+        anyWritable ? h('button', { type: 'button', className: 'vq-card-discard', onClick: clear, disabled: busy }, '清除凭据') : null,
+        h('button', { type: 'button', className: 'vq-card-save', onClick: save, disabled: busy || !dirty }, busy ? '保存中…' : '保存'),
       ),
     ) : null,
   )

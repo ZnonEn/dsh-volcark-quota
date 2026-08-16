@@ -17,9 +17,9 @@ DeepSeek Harness (DSH) 插件：**火山方舟 Coding Plan / Agent Plan 额度�
   重置倒计时每秒跳动，标题栏可拖动。
 - **两位小数**：已用百分比保留两位小数，与火山方舟控制台一致。
 - **自动刷新**：每 60s 拉取一次；凭据在「设置 → 插件」保存后即时刷新。
-- **配置入口**：AK/SK 与套餐类型在 DSH 的「设置 → 插件 → 火山方舟额度」卡片中
-  配置（模仿 DSH 自带 PluginCard 折叠卡样式），凭据存浏览器 localStorage，
-  随请求发给本机 DSH 服务，host 不落盘、不上传。
+- **安全存储**：AK/SK 走 DSH 官方凭据服务（`ctx.credentials`，与 DSH 自身存 API key
+  同一机制）——环境变量优先、`~/.dsh/.credentials.yaml` 落盘兜底；**浏览器不保存密钥**，
+  host 只向 UI 报告「已配置/来源/可写」，从不回传密钥值。
 
 ## 安装（公共安装方式）
 
@@ -31,9 +31,6 @@ dsh plugin add github:ZnonEn/dsh-volcark-quota
 # 或指定分支 / 版本
 dsh plugin add github:ZnonEn/dsh-volcark-quota#v0.0.1
 ```
-
-> 仓库当前为**私有**：仅你账号（或你授权的协作者）可安装；若日后公开，同一命令
-> 对所有人生效，无需任何改动。README 与安装方式按公共插件标准编写。
 
 ### 开发者模式（从源码构建）
 
@@ -54,19 +51,23 @@ bash scripts/build.sh          # host 复制到 lib/，client 用 tsdown 打包
 - **Secret AccessKey**：对应的 Secret Access Key
 - **套餐类型**：`auto`（先试 Coding Plan，失败自动试 Agent Plan）/ `coding` / `agent`
 
-点「保存」即生效（悬浮球即时刷新）。凭据仅存本机浏览器 localStorage，
-随请求发给 `127.0.0.1` 的 DSH 服务。
+点「保存」即写入 **DSH 凭据库**（`~/.dsh/.credentials.yaml`，与 DSH 自身存 API key
+同一机制）并即时生效。卡片只显示「已配置/来源/可写」状态，**不显示、不返回密钥值**；
+「清除凭据」按钮一键删除。
 
-### 方式 B：环境变量（全进程生效）
+### 方式 B：环境变量（优先级更高，全进程生效）
 
-启动 DSH 前设置：
+启动 DSH 前设置（与凭据库引用同名，会自动遮蔽文件层）：
 
 ```sh
-export VOLC_ACCESS_KEY_ID=AKLTxxxx
-export VOLC_ACCESS_KEY_SECRET=xxxxxxxx
+export VOLC_ARK_ACCESS_KEY_ID=AKLTxxxx
+export VOLC_ARK_ACCESS_KEY_SECRET=xxxxxxxx
 ```
 
-兼容别名：`VOLC_ACCESS_KEY` / `VOLC_SECRET_KEY`、`ARK_ACCESS_KEY_ID` / `ARK_ACCESS_KEY_SECRET`。
+兼容旧别名：`VOLC_ACCESS_KEY_ID` / `VOLC_ACCESS_KEY_SECRET`、`VOLC_ACCESS_KEY` /
+`VOLC_SECRET_KEY`、`ARK_ACCESS_KEY_ID` / `ARK_ACCESS_KEY_SECRET`。
+
+凭据解析优先级：请求体显式覆盖（高级用法）> 凭据库/环境变量 > 历史环境变量别名。
 
 ## 取数原理
 
@@ -80,7 +81,10 @@ export VOLC_ACCESS_KEY_SECRET=xxxxxxxx
 
 ## Host API
 
-`POST /dsh-volcark-quota/snapshot`（body `{ak, sk, planType}`），返回：
+- `GET /dsh-volcark-quota/config`：凭据状态（`configured/source/writable`），**不含值**
+- `POST /dsh-volcark-quota/config`：body `{ak, sk}`，写入凭据库（空串 = 清除该项）
+- `POST /dsh-volcark-quota/clear`：清除 AK/SK
+- `POST /dsh-volcark-quota/snapshot`（body `{planType}` 可选），返回：
 
 ```json
 {
