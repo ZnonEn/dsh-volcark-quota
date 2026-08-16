@@ -35,7 +35,6 @@ const CLEAR_URL = '/dsh-volcark-quota/clear'
 const LS_PLAN = 'dsh-volcark-quota.plan'
 const LS_OPEN = 'dsh-volcark-quota.open'
 const LS_BALL = 'dsh-volcark-quota.ball'
-const LS_WIN = 'dsh-volcark-quota.win'
 const CRED_EVENT = 'dsh-volcark-quota:credentials'
 const REFRESH_MS = 60000
 
@@ -90,6 +89,20 @@ function loadPos(key: string, fallback: () => { x: number; y: number }) {
     }
   } catch { /* ignore */ }
   return fallback()
+}
+
+/** 面板锚定到小球：小球在屏幕右半 → 面板贴小球左侧；左半 → 右侧；纵向夹在视口内。 */
+function panelFromBall(b: { x: number; y: number }): { x: number; y: number } {
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+  const PW = 400 // 面板宽度（与 CSS .vq-panel 一致）
+  const GAP = 10
+  const M = 8
+  const cx = b.x + 31 // 小球中心
+  let x = cx > vw / 2 ? b.x - PW - GAP : b.x + 62 + GAP
+  x = Math.max(M, Math.min(x, vw - PW - M))
+  const y = Math.max(M, Math.min(b.y, vh - 320 - M))
+  return { x, y }
 }
 
 // ---------- CSS（设计语言：DSH `--dsw-alias-*` token + opencode-go 面板风格） ----------
@@ -189,7 +202,7 @@ function QuotaFloater(): React.ReactElement {
   const [loading, setLoading] = React.useState(false)
   const [open, setOpen] = React.useState(() => localStorage.getItem(LS_OPEN) === '1')
   const [ball, setBall] = React.useState(() => loadPos(LS_BALL, () => ({ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) - 78, y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 146 })))
-  const [win, setWin] = React.useState(() => loadPos(LS_WIN, () => ({ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) - 420, y: 80 })))
+  const [win, setWin] = React.useState(() => ({ x: (typeof window !== 'undefined' ? window.innerWidth : 1200) - 420, y: 80 }))
   const [now, setNow] = React.useState(Date.now())
   const dragRef = React.useRef<{ startX: number; startY: number; origX: number; origY: number; moved: boolean; latestX?: number; latestY?: number; pointerId: number; target: HTMLElement } | null>(null)
 
@@ -236,6 +249,31 @@ function QuotaFloater(): React.ReactElement {
     localStorage.setItem(LS_OPEN, next ? '1' : '0')
   }
 
+  /** 从小球展开：面板锚定在小球所在位置（右半屏贴左、左半屏贴右、夹在视口内）。 */
+  const openFromBall = () => {
+    setWin(panelFromBall(ball))
+    toggleOpen(true)
+  }
+
+  /** 收起回小球：小球出现在面板收起位置（按展开时的小球侧判定，放回面板旁边）。 */
+  const closeToBall = () => {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    const PW = 400
+    const GAP = 10
+    const M = 8
+    const cx = ball.x + 31
+    // 与 panelFromBall 同一判据：展开时面板锚在小球哪一侧，收起时小球就回到面板那一侧的旁边
+    const panelOnLeft = cx > vw / 2
+    let nx = panelOnLeft ? win.x + PW + GAP : win.x - 62 - GAP
+    nx = Math.max(M, Math.min(nx, vw - 62 - M))
+    const ny = Math.max(M, Math.min(win.y, vh - 62 - M))
+    const nb = { x: nx, y: ny }
+    setBall(nb)
+    localStorage.setItem(LS_BALL, JSON.stringify(nb))
+    toggleOpen(false)
+  }
+
   // 拖动通用逻辑（Pointer Events：鼠标 / 触摸 / 笔统一；setPointerCapture 保证不丢指针）
   const startDrag = (e: React.PointerEvent, kind: 'ball' | 'win') => {
     if (e.pointerType === 'mouse' && e.button !== 0) return // 仅左键
@@ -275,11 +313,10 @@ function QuotaFloater(): React.ReactElement {
       window.removeEventListener('pointercancel', end)
       const final = { x: d.latestX ?? d.origX, y: d.latestY ?? d.origY }
       if (kind === 'ball') {
-        if (!d.moved) toggleOpen(true)
+        if (!d.moved) openFromBall()
         else localStorage.setItem(LS_BALL, JSON.stringify(final))
-      } else {
-        localStorage.setItem(LS_WIN, JSON.stringify(final))
       }
+      // 面板位置不持久化：每次从小球展开都会重新锚定到小球
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', end)
@@ -322,7 +359,7 @@ function QuotaFloater(): React.ReactElement {
       h('span', { className: 'vq-badge' }, data ? (data.plan === 'agent' ? 'Agent Plan' : 'Coding Plan') : '…'),
       h('span', { className: 'vq-spacer' }),
       h('button', { key: 'refresh', className: 'vq-ibtn', onClick: () => load(), title: '立即刷新', disabled: loading }, '刷新'),
-      h('button', { key: 'close', className: 'vq-ibtn', onClick: () => toggleOpen(false), title: '收起为小球' }, '收起'),
+      h('button', { key: 'close', className: 'vq-ibtn', onClick: () => closeToBall(), title: '收起为小球' }, '收起'),
     ),
   )
 
