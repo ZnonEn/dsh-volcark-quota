@@ -4,7 +4,8 @@ DeepSeek Harness (DSH) 插件：**火山方舟 Coding Plan / Agent Plan 额度�
 悬浮小球（收起）→ 点击展开可拖拽悬浮窗，实时展示套餐各窗口（5 小时 / 本周 /
 本月）的已用百分比（**两位小数**，与火山方舟控制台一致）、剩余量、重置倒计时；
 额度 ≥70% 变黄、≥90% 变红并告警。60 秒自动刷新。
-<img width="1166" height="882" alt="演示" src="https://github.com/user-attachments/assets/8c74ced1-f139-4500-a5b5-3d7e26584246" />
+<img width="1376" height="764" alt="演示" src="https://github.com/user-attachments/assets/d54693dc-8f04-4d82-bbb5-20921e3e84fa" />
+
 
 ## 功能
 
@@ -128,5 +129,5 @@ scripts/build.sh     构建：复制 host + tsdown 打包 client
 
 ---
 
-> 🛠 本项目完全使用 DeepSeek V4 Flash，以 vibe coding方式制作：
+> 🛠 本项目使用 DeepSeek V4 Flash与chatgpt 5.6，以 vibe coding方式制作：
 > 需求确认、UI 样式与验收由人工完成，代码由 AI 全程生成。
