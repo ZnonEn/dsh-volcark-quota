@@ -10,6 +10,9 @@
     "cordis.patch.yml"
   ],
   "license": "BSD-3-Clause",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/ZnonEn/dsh-volcark-quota.git"

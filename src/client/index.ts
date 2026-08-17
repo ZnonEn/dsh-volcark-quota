@@ -623,10 +623,10 @@ export function apply(ctx: ClientContext): void {
     ),
   ), 'dsh-volcark-quota: overlay floater')
 
-  // 设置 → 插件 → 配置卡片
+  // 设置 → 插件 → 配置卡片（rc7：keyed 插槽，key = host 注册的设置命名空间）
   ctx.effect(() => ctx.slots.inject('settings.plugin.item', () =>
     ctx.slots.register(
-      { name: 'settings.plugin.item', id: 'dsh-volcark-quota', order: 90 },
+      { name: 'settings.plugin.item', key: 'dsh-volcark-quota' },
       ConfigCard,
     ),
   ), 'dsh-volcark-quota: config card')

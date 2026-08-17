@@ -1,28 +1,31 @@
 /**
- * @dsh-external/dsh-volcark-quota — host 侧（零依赖纯 JS）
+ * @dsh-external/dsh-volcark-quota — host 侧（零依赖 + schemastery）
  *
  * 火山方舟 Coding Plan / Agent Plan 额度查询：
  *  - 认证：AK/SK + HMAC-SHA256 V4 签名（Volcengine OpenAPI）
  *  - 接口：GetCodingPlanUsage / GetAgentPlanAFPUsage（POST https://open.volcengineapi.com/）
  *  - 服务：webServer 路由 /dsh-volcark-quota/snapshot（client 面板消费）
  *
- * 依赖：仅 node:crypto / node:https + webServer / credentials 服务。
- * 不 import 任何 cordis / schemastery / @deepseek-ai/* 包，避免 profile
- * 依赖解析问题（credentialRef 运行时即字符串，直接传引用名即可）。
+ * 依赖：node:crypto / node:https + webServer / credentials / settings 服务
+ * + schemastery（profile 可解析）。不 import 任何 @deepseek-ai/* 包，避免
+ * profile 依赖解析问题（settingsNamespace / credentialRef 运行时即字符串）。
  *
- * 凭据存储（与 DSH 自身存 API key 同一机制）：
- *  - 走 ctx.credentials 服务（dsh-credentials-local）：env 优先，
- *    ~/.dsh/.credentials.yaml 落盘兜底，describe() 只报状态不返回值。
- *  - 引用名：VOLC_ARK_ACCESS_KEY_ID / VOLC_ARK_ACCESS_KEY_SECRET
- *  - 兼容旧环境变量：VOLC_ACCESS_KEY_ID / VOLC_ACCESS_KEY_SECRET 等。
- *  - 优先级：请求体显式覆盖 > credentials 服务 > 历史环境变量。
+ * DSH rc7 设置页机制：settings.plugin.item 改为 keyed 插槽，按「设置命名空间」
+ * 配对。host 通过 ctx.settings.register(ns, schema) 注册可配置命名空间，
+ * client 卡片以 key: ns 注册；tab 调 api.settings.describe() 列出命名空间。
+ * 本插件命名空间 = "dsh-volcark-quota"（schema 仅含非敏感的 planType，
+ * AK/SK 仍走 credentials 服务，浏览器不保存密钥）。
+ *
+ * 凭据解析优先级：请求体显式覆盖 > credentials 服务（env 优先 + yaml 落盘）
+ * > 历史环境变量别名。planType 优先级：请求体 > settings 命名空间 > 默认 auto。
  */
 
 import { createHash, createHmac } from 'node:crypto'
 import https from 'node:https'
+import z from '@deepseek-ai/schemastery'
 
 export const name = 'dsh-volcark-quota'
-export const inject = ['webServer', 'credentials']
+export const inject = ['webServer', 'credentials', 'settings']
 
 const VOLC_HOST = 'open.volcengineapi.com'
 const VOLC_REGION = 'cn-beijing'
@@ -33,6 +36,10 @@ const ACTIONS = { coding: 'GetCodingPlanUsage', agent: 'GetAgentPlanAFPUsage' }
 // DSH 凭据服务引用名（与 env 同名，env 会自然遮蔽文件层）
 const REF_AK = 'VOLC_ARK_ACCESS_KEY_ID'
 const REF_SK = 'VOLC_ARK_ACCESS_KEY_SECRET'
+
+// 设置命名空间（rc7 设置页按此 key 配对 client 卡片）
+const SETTINGS_NS = 'dsh-volcark-quota'
+const planTypeSchema = z.union(['auto', 'coding', 'agent']).default('auto')
 
 function num(v) {
   const n = Number(v)
@@ -240,6 +247,15 @@ export function apply(ctx, config = {}) {
     res.end(JSON.stringify(obj))
   }
 
+  // DSH rc7 设置页：注册可配置命名空间（keyed 插槽按此 ns 配对 client 卡片）。
+  // schema 仅含非敏感的 planType；AK/SK 仍走 credentials 服务（不落 settings 文档）。
+  const settingsScope = ctx.settings.register(SETTINGS_NS, z.object({
+    planType: planTypeSchema,
+  }), { base: { planType: config.planType ?? 'auto' } })
+  const settingsPlanType = () => {
+    try { return settingsScope.get().planType } catch { return 'auto' }
+  }
+
   // HTTP 路由：client 面板消费（POST JSON 或 GET query）
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
@@ -249,7 +265,7 @@ export function apply(ctx, config = {}) {
         const url = new URL(req.url || '/', 'http://dsh.local')
         let ak = url.searchParams.get('ak') ?? undefined
         let sk = url.searchParams.get('sk') ?? undefined
-        let planType = url.searchParams.get('planType') ?? config.planType ?? 'auto'
+        let planType = url.searchParams.get('planType') ?? settingsPlanType()
         if ((req.method || 'GET').toUpperCase() === 'POST') {
           const body = await readBody(req)
           if (body) {
